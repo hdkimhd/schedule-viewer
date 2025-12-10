@@ -95,12 +95,23 @@
             gap: 10px;
         }
 
+        /* Zoom Control */
+        .zoom-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: 20px;
+            padding-left: 20px;
+            border-left: 1px solid #ccc;
+        }
+
         /* Chart Section */
         .chart-container {
             overflow-x: auto;
             border: 1px solid var(--border-color);
             position: relative;
             background: white;
+            max-height: 80vh; /* Allow vertical scroll */
         }
 
         .timeline-header {
@@ -109,23 +120,8 @@
             background: #eee;
             position: sticky;
             top: 0;
-            z-index: 10;
-        }
-
-        .model-header-cell {
-            min-width: 100px;
-            width: 100px;
-            padding: 10px;
-            font-weight: bold;
-            background: #e0e0e0;
-            border-right: 2px solid var(--primary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-            position: sticky;
-            left: 100px; /* Adjusted for category column */
-            z-index: 20;
+            z-index: 30; /* Higher than content */
+            min-width: fit-content; /* Ensure header stretches */
         }
 
         .category-header-cell {
@@ -141,7 +137,23 @@
             flex-shrink: 0;
             position: sticky;
             left: 0;
-            z-index: 20;
+            z-index: 40;
+        }
+
+        .model-header-cell {
+            min-width: 100px;
+            width: 100px;
+            padding: 10px;
+            font-weight: bold;
+            background: #e0e0e0;
+            border-right: 2px solid var(--primary-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            position: sticky;
+            left: 100px; /* Adjusted for category column */
+            z-index: 40;
         }
 
         .months-container {
@@ -150,13 +162,14 @@
         }
 
         .month-cell {
-            flex: 1;
-            min-width: 60px;
+            /* flex: 1; Removed to allow fixed width scrolling */
+            min-width: var(--month-width, 100px);
             text-align: center;
             padding: 5px 0;
             border-right: 1px solid var(--border-color);
             font-size: 0.9em;
             background: #eee;
+            box-sizing: border-box;
         }
         
         .year-label {
@@ -167,28 +180,13 @@
 
         .chart-body {
             position: relative;
+            min-width: fit-content;
         }
 
-        .model-row {
+        /* New Grouping Structure */
+        .category-group {
             display: flex;
-            border-bottom: 1px solid var(--border-color);
-            min-height: var(--row-height);
-            position: relative;
-        }
-
-        .model-name {
-            min-width: 100px;
-            width: 100px;
-            background: #f4f4f4;
-            border-right: 2px solid var(--primary-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            flex-shrink: 0;
-            position: sticky;
-            left: 100px; /* Adjusted for category column */
-            z-index: 5;
+            border-bottom: 2px solid #999; /* Stronger separator between categories */
         }
 
         .category-name {
@@ -203,15 +201,51 @@
             flex-shrink: 0;
             position: sticky;
             left: 0;
-            z-index: 5;
+            z-index: 20;
             font-size: 0.9em;
+            writing-mode: vertical-rl; /* Vertical text for better fit */
+            transform: rotate(180deg);
+            padding: 10px 0;
+        }
+
+        .category-models {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+        }
+
+        .model-row {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            min-height: var(--row-height);
+            position: relative;
+        }
+        
+        .model-row:last-child {
+            border-bottom: none; /* Remove bottom border for last item in group */
+        }
+
+        .model-name {
+            min-width: 100px;
+            width: 100px;
+            background: #f4f4f4;
+            border-right: 2px solid var(--primary-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+            position: sticky;
+            left: 100px; /* Adjusted for category column */
+            z-index: 10;
         }
 
         .timeline-track {
             flex-grow: 1;
             position: relative;
             background-image: linear-gradient(to right, transparent 99%, #eee 1%);
-            background-size: calc(100% / 15) 100%; /* 15 months grid */
+            background-size: calc(100% / 15) 100%; /* This needs to match JS calculation */
+            /* We will use JS to set background size based on zoom */
         }
 
         .event-bar {
@@ -348,6 +382,12 @@
         <div class="action-buttons">
             <button class="clear-btn" onclick="clearEvents()">전체 초기화 (Clear All)</button>
         </div>
+        
+        <div class="zoom-controls">
+            <label for="zoomLevel">Zoom:</label>
+            <input type="range" id="zoomLevel" min="50" max="300" value="150" oninput="updateZoom(this.value)">
+            <button class="secondary-btn" onclick="scrollToToday()">오늘로 이동 (Today)</button>
+        </div>
     </div>
 
     <div class="chart-container" id="chartContainer">
@@ -383,6 +423,7 @@
     let events = [];
     let baseYear = 2025;
     let db = null;
+    let currentZoom = 150; // Default pixel width per month
     const DOC_ID = 'shared_schedule'; // Document ID in Firestore
 
     // Constants
@@ -399,7 +440,49 @@
         const end = new Date(baseYear, 1, 1);
         document.getElementById('startDate').valueAsDate = start;
         document.getElementById('endDate').valueAsDate = end;
+        
+        // Initial Zoom
+        updateZoom(currentZoom);
     };
+    
+    function updateZoom(val) {
+        currentZoom = parseInt(val);
+        document.documentElement.style.setProperty('--month-width', `${currentZoom}px`);
+        
+        // Update background grid size
+        const tracks = document.querySelectorAll('.timeline-track');
+        tracks.forEach(track => {
+            track.style.backgroundSize = `${currentZoom}px 100%`;
+        });
+        
+        // Re-render bars because their left/width % depends on total width which is now dynamic?
+        // Actually, if we use % for bars, they are relative to the track width.
+        // The track width is determined by its content (month cells).
+        // So if month cells grow, track grows, and % based bars grow proportionally.
+        // No need to re-render bars, just the grid lines.
+    }
+    
+    function scrollToToday() {
+        const today = new Date();
+        const startOfYear = new Date(baseYear, 0, 1);
+        
+        // Calculate months diff
+        let monthsDiff = (today.getFullYear() - baseYear) * 12 + today.getMonth();
+        
+        // Clamp to range
+        if (monthsDiff < 0) monthsDiff = 0;
+        if (monthsDiff > MONTHS_TO_SHOW) monthsDiff = MONTHS_TO_SHOW;
+        
+        // Calculate pixel offset
+        // Header cells (Category + Model) width = 200px
+        const offset = monthsDiff * currentZoom;
+        
+        const container = document.getElementById('chartContainer');
+        container.scrollTo({
+            left: offset,
+            behavior: 'smooth'
+        });
+    }
 
     function initFirebase() {
         if (!firebaseConfig.apiKey) {
@@ -565,55 +648,84 @@
             const catIndexA = CATEGORY_ORDER.indexOf(a.category);
             const catIndexB = CATEGORY_ORDER.indexOf(b.category);
             
-            // If both are in the list, compare index
             if (catIndexA !== -1 && catIndexB !== -1) {
                 if (catIndexA !== catIndexB) return catIndexA - catIndexB;
             } 
-            // If only A is in list, A comes first
             else if (catIndexA !== -1) return -1;
-            // If only B is in list, B comes first
             else if (catIndexB !== -1) return 1;
-            // If neither, sort alphabetically by category
             else {
                 const catCompare = a.category.localeCompare(b.category);
                 if (catCompare !== 0) return catCompare;
             }
-            
-            // Then sort by Model Name
             return a.model.localeCompare(b.model);
         });
         
-        // 3. Render Rows
+        // Group by Category for Rendering
+        const grouped = {};
         combinations.forEach(combo => {
-            const row = document.createElement('div');
-            row.className = 'model-row';
-
-            const categoryCell = document.createElement('div');
-            categoryCell.className = 'category-name';
-            categoryCell.textContent = combo.category;
-            row.appendChild(categoryCell);
-
-            const nameCell = document.createElement('div');
-            nameCell.className = 'model-name';
-            nameCell.textContent = combo.model;
-            row.appendChild(nameCell);
-
-            const track = document.createElement('div');
-            track.className = 'timeline-track';
-            
-            const modelEvents = events.filter(e => 
-                (e.category || 'Uncategorized') === combo.category && 
-                e.model === combo.model
-            );
-            
-            modelEvents.forEach(evt => {
-                const bar = createEventBar(evt);
-                track.appendChild(bar);
-            });
-
-            row.appendChild(track);
-            body.appendChild(row);
+            if (!grouped[combo.category]) grouped[combo.category] = [];
+            grouped[combo.category].push(combo);
         });
+        
+        // 3. Render Rows (Grouped Structure)
+        // Iterate through sorted categories
+        const sortedCategories = Object.keys(grouped).sort((a, b) => {
+             const catIndexA = CATEGORY_ORDER.indexOf(a);
+             const catIndexB = CATEGORY_ORDER.indexOf(b);
+             if (catIndexA !== -1 && catIndexB !== -1) return catIndexA - catIndexB;
+             if (catIndexA !== -1) return -1;
+             if (catIndexB !== -1) return 1;
+             return a.localeCompare(b);
+        });
+
+        sortedCategories.forEach(cat => {
+            const catGroup = document.createElement('div');
+            catGroup.className = 'category-group';
+            
+            // Category Label (Merged Cell)
+            const catLabel = document.createElement('div');
+            catLabel.className = 'category-name';
+            catLabel.textContent = cat;
+            catGroup.appendChild(catLabel);
+            
+            // Models Container
+            const modelsContainer = document.createElement('div');
+            modelsContainer.className = 'category-models';
+            
+            grouped[cat].forEach(combo => {
+                const row = document.createElement('div');
+                row.className = 'model-row';
+
+                const nameCell = document.createElement('div');
+                nameCell.className = 'model-name';
+                nameCell.textContent = combo.model;
+                row.appendChild(nameCell);
+
+                const track = document.createElement('div');
+                track.className = 'timeline-track';
+                // Set initial background size
+                track.style.backgroundSize = `${currentZoom}px 100%`;
+                
+                const modelEvents = events.filter(e => 
+                    (e.category || 'Uncategorized') === combo.category && 
+                    e.model === combo.model
+                );
+                
+                modelEvents.forEach(evt => {
+                    const bar = createEventBar(evt);
+                    track.appendChild(bar);
+                });
+
+                row.appendChild(track);
+                modelsContainer.appendChild(row);
+            });
+            
+            catGroup.appendChild(modelsContainer);
+            body.appendChild(catGroup);
+        });
+        
+        // Auto-scroll to today after render if first load
+        // setTimeout(scrollToToday, 500); 
     }
 
     function createEventBar(evt) {
