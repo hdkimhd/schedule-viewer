@@ -162,8 +162,8 @@
         }
 
         .month-cell {
-            /* flex: 1; Removed to allow fixed width scrolling */
-            min-width: var(--month-width, 100px);
+            flex: 1;
+            min-width: 100px;
             text-align: center;
             padding: 5px 0;
             border-right: 1px solid var(--border-color);
@@ -244,8 +244,7 @@
             flex-grow: 1;
             position: relative;
             background-image: linear-gradient(to right, transparent 99%, #eee 1%);
-            background-size: calc(100% / 15) 100%; /* This needs to match JS calculation */
-            /* We will use JS to set background size based on zoom */
+            /* background-size set by JS */
         }
 
         .event-bar {
@@ -380,13 +379,8 @@
         <button onclick="addEvent()">추가 (Add)</button>
         
         <div class="action-buttons">
+            <button class="secondary-btn" onclick="toggleViewMode()" id="viewModeBtn">전체 보기 (Full Year)</button>
             <button class="clear-btn" onclick="clearEvents()">전체 초기화 (Clear All)</button>
-        </div>
-        
-        <div class="zoom-controls">
-            <label for="zoomLevel">Zoom:</label>
-            <input type="range" id="zoomLevel" min="50" max="300" value="150" oninput="updateZoom(this.value)">
-            <button class="secondary-btn" onclick="scrollToToday()">오늘로 이동 (Today)</button>
         </div>
     </div>
 
@@ -423,11 +417,10 @@
     let events = [];
     let baseYear = 2025;
     let db = null;
-    let currentZoom = 150; // Default pixel width per month
+    let isFullView = false;
     const DOC_ID = 'shared_schedule'; // Document ID in Firestore
 
     // Constants
-    const MONTHS_TO_SHOW = 15;
     const CATEGORY_ORDER = ["Soundbar", "SoundSuite", "무선스피커", "이어버드"];
 
     // Initialize
@@ -435,53 +428,19 @@
         initFirebase();
         
         const today = new Date();
-        // Set default dates
-        const start = new Date(baseYear, 0, 1);
-        const end = new Date(baseYear, 1, 1);
+        // Set default dates: Start = Today, End = End of Current Month
+        const start = new Date();
+        const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+        
         document.getElementById('startDate').valueAsDate = start;
         document.getElementById('endDate').valueAsDate = end;
-        
-        // Initial Zoom
-        updateZoom(currentZoom);
     };
     
-    function updateZoom(val) {
-        currentZoom = parseInt(val);
-        document.documentElement.style.setProperty('--month-width', `${currentZoom}px`);
-        
-        // Update background grid size
-        const tracks = document.querySelectorAll('.timeline-track');
-        tracks.forEach(track => {
-            track.style.backgroundSize = `${currentZoom}px 100%`;
-        });
-        
-        // Re-render bars because their left/width % depends on total width which is now dynamic?
-        // Actually, if we use % for bars, they are relative to the track width.
-        // The track width is determined by its content (month cells).
-        // So if month cells grow, track grows, and % based bars grow proportionally.
-        // No need to re-render bars, just the grid lines.
-    }
-    
-    function scrollToToday() {
-        const today = new Date();
-        const startOfYear = new Date(baseYear, 0, 1);
-        
-        // Calculate months diff
-        let monthsDiff = (today.getFullYear() - baseYear) * 12 + today.getMonth();
-        
-        // Clamp to range
-        if (monthsDiff < 0) monthsDiff = 0;
-        if (monthsDiff > MONTHS_TO_SHOW) monthsDiff = MONTHS_TO_SHOW;
-        
-        // Calculate pixel offset
-        // Header cells (Category + Model) width = 200px
-        const offset = monthsDiff * currentZoom;
-        
-        const container = document.getElementById('chartContainer');
-        container.scrollTo({
-            left: offset,
-            behavior: 'smooth'
-        });
+    function toggleViewMode() {
+        isFullView = !isFullView;
+        const btn = document.getElementById('viewModeBtn');
+        btn.textContent = isFullView ? "기본 보기 (Default View)" : "전체 보기 (Full Year)";
+        renderChart();
     }
 
     function initFirebase() {
@@ -590,13 +549,29 @@
         });
     }
 
-    // --- Rendering (Same as before) ---
+    // --- Rendering ---
     function renderChart() {
         const header = document.getElementById('timelineHeader');
         const body = document.getElementById('chartBody');
         
         header.innerHTML = '';
         body.innerHTML = '';
+
+        // Determine Date Range
+        let chartStart, totalMonths;
+        const today = new Date();
+
+        if (isFullView) {
+            chartStart = new Date(baseYear, 0, 1);
+            totalMonths = 15; // Fixed 15 months for full view
+        } else {
+            // Default: Last Month ~ +3 Months (Total 5 months)
+            chartStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            totalMonths = 5; 
+        }
+        
+        // Calculate Chart End (First day of the month AFTER the last month)
+        const chartEnd = new Date(chartStart.getFullYear(), chartStart.getMonth() + totalMonths, 1);
 
         // 1. Render Header
         const categoryHeader = document.createElement('div');
@@ -613,8 +588,8 @@
         monthsContainer.className = 'months-container';
         
         const monthNames = [];
-        for (let i = 0; i < MONTHS_TO_SHOW; i++) {
-            const d = new Date(baseYear, i, 1);
+        for (let i = 0; i < totalMonths; i++) {
+            const d = new Date(chartStart.getFullYear(), chartStart.getMonth() + i, 1);
             const m = d.getMonth() + 1;
             const y = d.getFullYear();
             monthNames.push({ m, y });
@@ -703,8 +678,6 @@
 
                 const track = document.createElement('div');
                 track.className = 'timeline-track';
-                // Set initial background size
-                track.style.backgroundSize = `${currentZoom}px 100%`;
                 
                 const modelEvents = events.filter(e => 
                     (e.category || 'Uncategorized') === combo.category && 
@@ -712,7 +685,7 @@
                 );
                 
                 modelEvents.forEach(evt => {
-                    const bar = createEventBar(evt);
+                    const bar = createEventBar(evt, chartStart, chartEnd);
                     track.appendChild(bar);
                 });
 
@@ -723,17 +696,12 @@
             catGroup.appendChild(modelsContainer);
             body.appendChild(catGroup);
         });
-        
-        // Auto-scroll to today after render if first load
-        // setTimeout(scrollToToday, 500); 
     }
 
-    function createEventBar(evt) {
+    function createEventBar(evt, chartStart, chartEnd) {
         const startDate = new Date(evt.start);
         const endDate = new Date(evt.end);
         
-        const chartStart = new Date(baseYear, 0, 1);
-        const chartEnd = new Date(baseYear + 1, 3, 0); 
         const totalDuration = chartEnd - chartStart;
 
         let startDiff = startDate - chartStart;
@@ -742,6 +710,14 @@
         if (startDate < chartStart) {
             duration -= (chartStart - startDate);
             startDiff = 0;
+        }
+        
+        // If duration is negative (event completely before start) or starts after end
+        if (duration <= 0 || startDate >= chartEnd) {
+             // Return hidden element
+             const hidden = document.createElement('div');
+             hidden.style.display = 'none';
+             return hidden;
         }
         
         const leftPercent = (startDiff / totalDuration) * 100;
