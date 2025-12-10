@@ -124,6 +124,22 @@
             justify-content: center;
             flex-shrink: 0;
             position: sticky;
+            left: 100px; /* Adjusted for category column */
+            z-index: 20;
+        }
+
+        .category-header-cell {
+            min-width: 100px;
+            width: 100px;
+            padding: 10px;
+            font-weight: bold;
+            background: #d0d0d0;
+            border-right: 2px solid var(--primary-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            position: sticky;
             left: 0;
             z-index: 20;
         }
@@ -171,8 +187,24 @@
             font-weight: bold;
             flex-shrink: 0;
             position: sticky;
+            left: 100px; /* Adjusted for category column */
+            z-index: 5;
+        }
+
+        .category-name {
+            min-width: 100px;
+            width: 100px;
+            background: #e8e8e8;
+            border-right: 2px solid var(--primary-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+            position: sticky;
             left: 0;
             z-index: 5;
+            font-size: 0.9em;
         }
 
         .timeline-track {
@@ -276,6 +308,15 @@
             <input type="number" id="baseYear" value="2025" style="width: 80px;">
         </div>
         <div class="control-group">
+            <label for="categoryName">제품군 (Category)</label>
+            <select id="categoryName">
+                <option value="Soundbar">Soundbar</option>
+                <option value="SoundSuite">SoundSuite</option>
+                <option value="무선스피커">무선스피커</option>
+                <option value="이어버드">이어버드</option>
+            </select>
+        </div>
+        <div class="control-group">
             <label for="modelName">모델명 (Model)</label>
             <input type="text" id="modelName" placeholder="e.g., S7" value="S7">
         </div>
@@ -346,6 +387,7 @@
 
     // Constants
     const MONTHS_TO_SHOW = 15;
+    const CATEGORY_ORDER = ["Soundbar", "SoundSuite", "무선스피커", "이어버드"];
 
     // Initialize
     window.onload = () => {
@@ -410,6 +452,7 @@
     function addEvent() {
         if (!db) return alert('데이터베이스에 연결되지 않았습니다.');
 
+        const category = document.getElementById('categoryName').value;
         const model = document.getElementById('modelName').value;
         const name = document.getElementById('eventName').value;
         const start = document.getElementById('startDate').value;
@@ -424,6 +467,7 @@
 
         events.push({
             id: Date.now(),
+            category: category || 'Uncategorized',
             model,
             name,
             start,
@@ -472,6 +516,11 @@
         body.innerHTML = '';
 
         // 1. Render Header
+        const categoryHeader = document.createElement('div');
+        categoryHeader.className = 'category-header-cell';
+        categoryHeader.textContent = 'Category';
+        header.appendChild(categoryHeader);
+
         const modelHeader = document.createElement('div');
         modelHeader.className = 'model-header-cell';
         modelHeader.textContent = 'Model';
@@ -494,21 +543,68 @@
         }
         header.appendChild(monthsContainer);
 
-        const models = [...new Set(events.map(e => e.model))].sort();
+        // 2. Group events by Category and Model
+        // Get unique combinations
+        const combinations = [];
+        const seen = new Set();
         
-        models.forEach(model => {
+        events.forEach(e => {
+            const key = `${e.category || 'Uncategorized'}|${e.model}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                combinations.push({
+                    category: e.category || 'Uncategorized',
+                    model: e.model
+                });
+            }
+        });
+
+        // Sort combinations
+        combinations.sort((a, b) => {
+            // Sort by Category Order
+            const catIndexA = CATEGORY_ORDER.indexOf(a.category);
+            const catIndexB = CATEGORY_ORDER.indexOf(b.category);
+            
+            // If both are in the list, compare index
+            if (catIndexA !== -1 && catIndexB !== -1) {
+                if (catIndexA !== catIndexB) return catIndexA - catIndexB;
+            } 
+            // If only A is in list, A comes first
+            else if (catIndexA !== -1) return -1;
+            // If only B is in list, B comes first
+            else if (catIndexB !== -1) return 1;
+            // If neither, sort alphabetically by category
+            else {
+                const catCompare = a.category.localeCompare(b.category);
+                if (catCompare !== 0) return catCompare;
+            }
+            
+            // Then sort by Model Name
+            return a.model.localeCompare(b.model);
+        });
+        
+        // 3. Render Rows
+        combinations.forEach(combo => {
             const row = document.createElement('div');
             row.className = 'model-row';
 
+            const categoryCell = document.createElement('div');
+            categoryCell.className = 'category-name';
+            categoryCell.textContent = combo.category;
+            row.appendChild(categoryCell);
+
             const nameCell = document.createElement('div');
             nameCell.className = 'model-name';
-            nameCell.textContent = model;
+            nameCell.textContent = combo.model;
             row.appendChild(nameCell);
 
             const track = document.createElement('div');
             track.className = 'timeline-track';
             
-            const modelEvents = events.filter(e => e.model === model);
+            const modelEvents = events.filter(e => 
+                (e.category || 'Uncategorized') === combo.category && 
+                e.model === combo.model
+            );
             
             modelEvents.forEach(evt => {
                 const bar = createEventBar(evt);
