@@ -331,6 +331,26 @@
         .event-bar:hover .delete-btn {
             display: block;
         }
+
+        /* Resize Handles */
+        .resize-handle {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 10px;
+            cursor: ew-resize;
+            z-index: 102;
+            background: transparent;
+        }
+        .resize-handle:hover {
+            background: rgba(0,0,0,0.1);
+        }
+        .resize-handle.left {
+            left: 0;
+        }
+        .resize-handle.right {
+            right: 0;
+        }
     </style>
 </head>
 <body>
@@ -348,8 +368,8 @@
             <select id="categoryName">
                 <option value="Soundbar">Soundbar</option>
                 <option value="SoundSuite">SoundSuite</option>
-                <option value="무선스피커">무선스피커</option>
-                <option value="이어버드">이어버드</option>
+                <option value="XBOOM">XBOOM</option>
+                <option value="XBOOM Buds">XBOOM Buds</option>
             </select>
         </div>
         <div class="control-group">
@@ -438,9 +458,18 @@
     let db = null;
     let isFullView = false;
     const DOC_ID = 'shared_schedule'; // Document ID in Firestore
+    
+    // Resize State
+    let isResizing = false;
+    let resizeTargetId = null;
+    let resizeDirection = null; // 'left' or 'right'
+    let resizeStartX = 0;
+    let resizeOriginalStart = null;
+    let resizeOriginalEnd = null;
+    let resizeMonthConfig = null; // To access config during resize
 
     // Constants
-    const CATEGORY_ORDER = ["Soundbar", "SoundSuite", "무선스피커", "이어버드"];
+    const CATEGORY_ORDER = ["Soundbar", "SoundSuite", "XBOOM", "XBOOM Buds"];
 
     // Initialize
     window.onload = () => {
@@ -669,6 +698,32 @@
             
             return config.startPercent + (dayOffset / daysInMonth) * config.widthPercent;
         };
+        
+        // Helper to get date from percentage position (Inverse of getDatePosition)
+        const getDateFromPercent = (percent) => {
+            if (percent <= 0) return new Date(chartStart);
+            if (percent >= 100) return new Date(chartEnd);
+
+            // Find which month config covers this percent
+            const config = monthConfig.find(c => percent >= c.startPercent && percent < (c.startPercent + c.widthPercent));
+            
+            if (!config) return new Date(chartEnd); // Fallback
+
+            const monthStart = new Date(config.date.getFullYear(), config.date.getMonth(), 1);
+            const nextMonth = new Date(config.date.getFullYear(), config.date.getMonth() + 1, 1);
+            const daysInMonth = (nextMonth - monthStart) / (1000 * 60 * 60 * 24);
+            
+            // Calculate day offset
+            const percentInMonth = percent - config.startPercent;
+            const dayOffset = (percentInMonth / config.widthPercent) * daysInMonth;
+            
+            const resultDate = new Date(monthStart);
+            resultDate.setDate(monthStart.getDate() + Math.round(dayOffset));
+            return resultDate;
+        };
+        
+        // Store config for resize handler
+        resizeMonthConfig = { getDateFromPercent };
 
 
         // 1. Render Header
@@ -862,10 +917,16 @@
         
         const startPercent = getDatePosition(startDate);
         const endPercent = getDatePosition(endDate);
-        const widthPercent = endPercent - startPercent;
+        let widthPercent = endPercent - startPercent;
 
-        // If width is negative or zero (out of range or invalid)
-        if (widthPercent <= 0) {
+        // Handle same start/end date or very small duration
+        let isSingleDay = false;
+        if (startDate.getTime() === endDate.getTime()) {
+            isSingleDay = true;
+            // Give it a minimum width to be visible (e.g., 1% or calculated based on month width)
+            // Since we don't know exact pixel width here easily, let's use a small fixed percent
+            widthPercent = Math.max(widthPercent, 1.5); 
+        } else if (widthPercent <= 0) {
              const hidden = document.createElement('div');
              hidden.style.display = 'none';
              return hidden;
@@ -884,20 +945,25 @@
         // Delete button only for non-aggregated events
         const deleteBtn = evt.isAggregated ? '' : `<button class="delete-btn" onclick="deleteEvent(${evt.id}); event.stopPropagation();">×</button>`;
         
+        const dateText = isSingleDay ? formatDate(startDate) : `${formatDate(startDate)} ~ ${formatDate(endDate)}`;
+
         bar.innerHTML = `
             <div>${evt.name}</div>
-            <div class="dates">${formatDate(startDate)} ~ ${formatDate(endDate)}</div>
+            <div class="dates">${dateText}</div>
             ${deleteBtn}
+            ${!evt.isAggregated ? '<div class="resize-handle left"></div><div class="resize-handle right"></div>' : ''}
         `;
 
+        // Tooltip
         bar.addEventListener('mousemove', (e) => {
+            if (isResizing) return; // Don't show tooltip while resizing
             const tooltip = document.getElementById('tooltip');
             tooltip.style.display = 'block';
             tooltip.style.left = e.pageX + 10 + 'px';
             tooltip.style.top = e.pageY + 10 + 'px';
             tooltip.innerHTML = `
                 <strong>${evt.model} - ${evt.name}</strong><br>
-                ${evt.start} ~ ${evt.end}
+                ${dateText}
             `;
         });
         
@@ -905,7 +971,101 @@
             document.getElementById('tooltip').style.display = 'none';
         });
 
+        // Resize Handlers
+        if (!evt.isAggregated) {
+            const leftHandle = bar.querySelector('.resize-handle.left');
+            const rightHandle = bar.querySelector('.resize-handle.right');
+
+            leftHandle.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                startResize(e, evt.id, 'left', startDate, endDate);
+            });
+
+            rightHandle.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                startResize(e, evt.id, 'right', startDate, endDate);
+            });
+        }
+
         return bar;
+    }
+
+    // --- Resize Logic ---
+    function startResize(e, id, direction, start, end) {
+        isResizing = true;
+        resizeTargetId = id;
+        resizeDirection = direction;
+        resizeStartX = e.pageX;
+        resizeOriginalStart = new Date(start);
+        resizeOriginalEnd = new Date(end);
+        
+        document.body.style.cursor = 'ew-resize';
+        
+        // Add global listeners
+        document.addEventListener('mousemove', handleResizeMove);
+        document.addEventListener('mouseup', handleResizeEnd);
+    }
+
+    function handleResizeMove(e) {
+        if (!isResizing) return;
+        // Visual feedback could be implemented here, but for simplicity 
+        // we will just update on mouseup or maybe update a ghost element.
+        // For now, let's just rely on the cursor.
+    }
+
+    function handleResizeEnd(e) {
+        if (!isResizing) return;
+        
+        const track = document.querySelector('.timeline-track'); // Any track will do for width
+        if (!track) return stopResize();
+
+        const rect = track.getBoundingClientRect();
+        const currentX = e.pageX - rect.left;
+        const percent = (currentX / rect.width) * 100;
+        
+        // Calculate new date
+        const newDate = resizeMonthConfig.getDateFromPercent(percent);
+        
+        // Update Event
+        const eventIndex = events.findIndex(ev => ev.id === resizeTargetId);
+        if (eventIndex !== -1) {
+            const evt = events[eventIndex];
+            
+            if (resizeDirection === 'left') {
+                // Update Start Date
+                // Ensure start <= end
+                if (newDate <= new Date(evt.end)) {
+                    evt.start = formatDateString(newDate);
+                }
+            } else {
+                // Update End Date
+                // Ensure end >= start
+                if (newDate >= new Date(evt.start)) {
+                    evt.end = formatDateString(newDate);
+                }
+            }
+            
+            saveToFirebase(); // This will trigger re-render
+        }
+        
+        stopResize();
+    }
+
+    function stopResize() {
+        isResizing = false;
+        resizeTargetId = null;
+        document.body.style.cursor = 'default';
+        document.removeEventListener('mousemove', handleResizeMove);
+        document.removeEventListener('mouseup', handleResizeEnd);
+    }
+
+    function formatDateString(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
     }
 
     function formatDate(date) {
