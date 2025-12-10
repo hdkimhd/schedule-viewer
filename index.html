@@ -254,6 +254,7 @@
             border: 1px solid #999;
             border-radius: 4px;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             font-size: 0.8em;
@@ -264,6 +265,8 @@
             top: 10px; /* Default top */
             cursor: pointer;
             transition: transform 0.1s;
+            line-height: 1.2;
+            padding: 2px 0;
         }
 
         .event-bar:hover {
@@ -273,8 +276,7 @@
 
         .event-bar .dates {
             font-size: 0.7em;
-            position: absolute;
-            bottom: 2px;
+            margin-top: 2px;
             width: 100%;
             text-align: center;
             opacity: 0.7;
@@ -318,11 +320,12 @@
             border-radius: 50%;
             width: 16px;
             height: 16px;
-            font-size: 10px;
-            line-height: 16px;
+            font-size: 12px;
+            line-height: 14px;
             text-align: center;
             cursor: pointer;
             display: none;
+            z-index: 101;
         }
         
         .event-bar:hover .delete-btn {
@@ -355,15 +358,7 @@
         </div>
         <div class="control-group">
             <label for="eventPhase">이벤트 단계 (Phase)</label>
-            <select id="eventPhase">
-                <option value="FC">FC</option>
-                <option value="PV">PV</option>
-                <option value="MR">MR</option>
-                <option value="QE">QE</option>
-                <option value="CP">CP</option>
-                <option value="DV">DV</option>
-                <option value="Other">Other</option>
-            </select>
+            <input type="text" id="eventPhase" placeholder="e.g., FC, PV" value="FC">
         </div>
         <div class="control-group">
             <label for="eventRound">차수 (Round)</label>
@@ -603,6 +598,79 @@
         // Calculate Chart End (First day of the month AFTER the last month)
         const chartEnd = new Date(chartStart.getFullYear(), chartStart.getMonth() + totalMonths, 1);
 
+        // --- Dynamic Column Width Calculation ---
+        // 1. Identify months with events
+        const activeMonths = new Set();
+        events.forEach(e => {
+            const s = new Date(e.start);
+            const end = new Date(e.end);
+            
+            // Check overlap with chart range
+            if (s < chartEnd && end > chartStart) {
+                // Iterate through months this event touches
+                let current = new Date(s.getFullYear(), s.getMonth(), 1);
+                if (current < chartStart) current = new Date(chartStart);
+                
+                while (current < end && current < chartEnd) {
+                    const key = `${current.getFullYear()}-${current.getMonth()}`;
+                    activeMonths.add(key);
+                    current.setMonth(current.getMonth() + 1);
+                }
+            }
+        });
+
+        // 2. Assign weights and calculate positions
+        const monthConfig = [];
+        let totalWeight = 0;
+
+        for (let i = 0; i < totalMonths; i++) {
+            const d = new Date(chartStart.getFullYear(), chartStart.getMonth() + i, 1);
+            const key = `${d.getFullYear()}-${d.getMonth()}`;
+            
+            // Weight: 3 if active, 1 if empty
+            const weight = activeMonths.has(key) ? 3 : 1;
+            
+            monthConfig.push({
+                date: d,
+                weight: weight,
+                startPercent: 0, // Will be calculated
+                widthPercent: 0  // Will be calculated
+            });
+            totalWeight += weight;
+        }
+
+        // 3. Calculate percentages
+        let currentPercent = 0;
+        monthConfig.forEach(m => {
+            m.startPercent = currentPercent;
+            m.widthPercent = (m.weight / totalWeight) * 100;
+            currentPercent += m.widthPercent;
+        });
+
+        // Helper to get position for a specific date
+        const getDatePosition = (date) => {
+            if (date < chartStart) return 0;
+            if (date >= chartEnd) return 100;
+
+            // Find which month this date belongs to
+            // Since monthConfig is ordered, we can find index
+            let monthIndex = (date.getFullYear() - chartStart.getFullYear()) * 12 + (date.getMonth() - chartStart.getMonth());
+            
+            if (monthIndex < 0) return 0;
+            if (monthIndex >= monthConfig.length) return 100;
+
+            const config = monthConfig[monthIndex];
+            
+            // Calculate offset within the month
+            const monthStart = new Date(config.date.getFullYear(), config.date.getMonth(), 1);
+            const nextMonth = new Date(config.date.getFullYear(), config.date.getMonth() + 1, 1);
+            const daysInMonth = (nextMonth - monthStart) / (1000 * 60 * 60 * 24);
+            const dayOffset = (date - monthStart) / (1000 * 60 * 60 * 24);
+            
+            return config.startPercent + (dayOffset / daysInMonth) * config.widthPercent;
+        };
+
+
         // 1. Render Header
         const categoryHeader = document.createElement('div');
         categoryHeader.className = 'category-header-cell';
@@ -617,18 +685,19 @@
         const monthsContainer = document.createElement('div');
         monthsContainer.className = 'months-container';
         
-        const monthNames = [];
-        for (let i = 0; i < totalMonths; i++) {
-            const d = new Date(chartStart.getFullYear(), chartStart.getMonth() + i, 1);
-            const m = d.getMonth() + 1;
-            const y = d.getFullYear();
-            monthNames.push({ m, y });
+        monthConfig.forEach(config => {
+            const m = config.date.getMonth() + 1;
+            const y = config.date.getFullYear();
             
             const cell = document.createElement('div');
             cell.className = 'month-cell';
-            cell.innerHTML = `<span class="year-label">${i === 0 || m === 1 ? y + '년' : ''}</span>${m}월`;
+            // Apply dynamic width
+            cell.style.flex = 'none'; // Disable flex grow
+            cell.style.width = `${config.widthPercent}%`;
+            
+            cell.innerHTML = `<span class="year-label">${config === monthConfig[0] || m === 1 ? y + '년' : ''}</span>${m}월`;
             monthsContainer.appendChild(cell);
-        }
+        });
         header.appendChild(monthsContainer);
 
         // 2. Group events by Category and Model
@@ -708,7 +777,21 @@
 
                 const track = document.createElement('div');
                 track.className = 'timeline-track';
+                // Remove background gradient as it won't match variable widths easily
+                track.style.backgroundImage = 'none';
                 
+                // Add grid lines manually to match headers
+                monthConfig.forEach(config => {
+                    const line = document.createElement('div');
+                    line.style.position = 'absolute';
+                    line.style.left = `${config.startPercent}%`;
+                    line.style.width = '1px';
+                    line.style.height = '100%';
+                    line.style.background = '#eee';
+                    line.style.zIndex = '0';
+                    track.appendChild(line);
+                });
+
                 let displayEvents = [];
 
                 if (isFullView) {
@@ -760,7 +843,7 @@
                 }
                 
                 displayEvents.forEach(evt => {
-                    const bar = createEventBar(evt, chartStart, chartEnd);
+                    const bar = createEventBar(evt, getDatePosition);
                     track.appendChild(bar);
                 });
 
@@ -773,38 +856,28 @@
         });
     }
 
-    function createEventBar(evt, chartStart, chartEnd) {
+    function createEventBar(evt, getDatePosition) {
         const startDate = new Date(evt.start);
         const endDate = new Date(evt.end);
         
-        const totalDuration = chartEnd - chartStart;
+        const startPercent = getDatePosition(startDate);
+        const endPercent = getDatePosition(endDate);
+        const widthPercent = endPercent - startPercent;
 
-        let startDiff = startDate - chartStart;
-        let duration = endDate - startDate;
-
-        if (startDate < chartStart) {
-            duration -= (chartStart - startDate);
-            startDiff = 0;
-        }
-        
-        // If duration is negative (event completely before start) or starts after end
-        if (duration <= 0 || startDate >= chartEnd) {
-             // Return hidden element
+        // If width is negative or zero (out of range or invalid)
+        if (widthPercent <= 0) {
              const hidden = document.createElement('div');
              hidden.style.display = 'none';
              return hidden;
         }
         
-        const leftPercent = (startDiff / totalDuration) * 100;
-        const widthPercent = (duration / totalDuration) * 100;
-
         const bar = document.createElement('div');
         bar.className = 'event-bar';
         if (evt.position === 'bottom') {
             bar.classList.add('phase-2');
         }
         
-        bar.style.left = `${leftPercent}%`;
+        bar.style.left = `${startPercent}%`;
         bar.style.width = `${widthPercent}%`;
         bar.style.backgroundColor = evt.color;
         
@@ -812,7 +885,7 @@
         const deleteBtn = evt.isAggregated ? '' : `<button class="delete-btn" onclick="deleteEvent(${evt.id}); event.stopPropagation();">×</button>`;
         
         bar.innerHTML = `
-            ${evt.name}
+            <div>${evt.name}</div>
             <div class="dates">${formatDate(startDate)} ~ ${formatDate(endDate)}</div>
             ${deleteBtn}
         `;
