@@ -354,8 +354,32 @@
             <input type="text" id="modelName" placeholder="e.g., S7" value="S7">
         </div>
         <div class="control-group">
-            <label for="eventName">이벤트 단계 (Event)</label>
-            <input type="text" id="eventName" placeholder="e.g., CP, PV" value="CP">
+            <label for="eventPhase">이벤트 단계 (Phase)</label>
+            <select id="eventPhase">
+                <option value="FC">FC</option>
+                <option value="PV">PV</option>
+                <option value="MR">MR</option>
+                <option value="QE">QE</option>
+                <option value="CP">CP</option>
+                <option value="DV">DV</option>
+                <option value="Other">Other</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="eventRound">차수 (Round)</label>
+            <select id="eventRound">
+                <option value="">없음 (None)</option>
+                <option value="1차">1차</option>
+                <option value="2차">2차</option>
+                <option value="3차">3차</option>
+                <option value="4차">4차</option>
+                <option value="5차">5차</option>
+                <option value="6차">6차</option>
+                <option value="7차">7차</option>
+                <option value="8차">8차</option>
+                <option value="9차">9차</option>
+                <option value="10차">10차</option>
+            </select>
         </div>
         <div class="control-group">
             <label for="startDate">시작일 (Start)</label>
@@ -496,13 +520,17 @@
 
         const category = document.getElementById('categoryName').value;
         const model = document.getElementById('modelName').value;
-        const name = document.getElementById('eventName').value;
+        
+        const phase = document.getElementById('eventPhase').value;
+        const round = document.getElementById('eventRound').value;
+        const name = round ? `${phase} ${round}` : phase;
+
         const start = document.getElementById('startDate').value;
         const end = document.getElementById('endDate').value;
         const color = document.getElementById('eventColor').value;
         const position = document.getElementById('rowPosition').value;
 
-        if (!model || !name || !start || !end) {
+        if (!model || !start || !end) {
             alert('모든 필드를 입력해주세요.');
             return;
         }
@@ -512,6 +540,8 @@
             category: category || 'Uncategorized',
             model,
             name,
+            phase, // Store separately for aggregation
+            round, // Store separately
             start,
             end,
             color,
@@ -565,9 +595,9 @@
             chartStart = new Date(baseYear, 0, 1);
             totalMonths = 15; // Fixed 15 months for full view
         } else {
-            // Default: Last Month ~ +3 Months (Total 5 months)
+            // Default: Previous Month, Current Month, Next Month (Total 3 months)
             chartStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-            totalMonths = 5; 
+            totalMonths = 3; 
         }
         
         // Calculate Chart End (First day of the month AFTER the last month)
@@ -679,12 +709,57 @@
                 const track = document.createElement('div');
                 track.className = 'timeline-track';
                 
-                const modelEvents = events.filter(e => 
-                    (e.category || 'Uncategorized') === combo.category && 
-                    e.model === combo.model
-                );
+                let displayEvents = [];
+
+                if (isFullView) {
+                    // Aggregation Logic for Full View
+                    const modelEvents = events.filter(e => 
+                        (e.category || 'Uncategorized') === combo.category && 
+                        e.model === combo.model
+                    );
+
+                    // Group by Phase
+                    const phaseGroups = {};
+                    modelEvents.forEach(e => {
+                        // Use phase if available, otherwise fallback to name (for old data)
+                        const p = e.phase || e.name.split(' ')[0]; 
+                        if (!phaseGroups[p]) phaseGroups[p] = [];
+                        phaseGroups[p].push(e);
+                    });
+
+                    Object.keys(phaseGroups).forEach(p => {
+                        const group = phaseGroups[p];
+                        // Find min start and max end
+                        let minStart = group[0].start;
+                        let maxEnd = group[0].end;
+                        
+                        group.forEach(g => {
+                            if (g.start < minStart) minStart = g.start;
+                            if (g.end > maxEnd) maxEnd = g.end;
+                        });
+
+                        displayEvents.push({
+                            id: 'aggregated-' + Date.now() + Math.random(), // Dummy ID
+                            isAggregated: true,
+                            category: combo.category,
+                            model: combo.model,
+                            name: p, // Just the phase name
+                            start: minStart,
+                            end: maxEnd,
+                            color: group[0].color,
+                            position: group[0].position
+                        });
+                    });
+
+                } else {
+                    // Normal View: Show all events individually
+                    displayEvents = events.filter(e => 
+                        (e.category || 'Uncategorized') === combo.category && 
+                        e.model === combo.model
+                    );
+                }
                 
-                modelEvents.forEach(evt => {
+                displayEvents.forEach(evt => {
                     const bar = createEventBar(evt, chartStart, chartEnd);
                     track.appendChild(bar);
                 });
@@ -733,10 +808,13 @@
         bar.style.width = `${widthPercent}%`;
         bar.style.backgroundColor = evt.color;
         
+        // Delete button only for non-aggregated events
+        const deleteBtn = evt.isAggregated ? '' : `<button class="delete-btn" onclick="deleteEvent(${evt.id}); event.stopPropagation();">×</button>`;
+        
         bar.innerHTML = `
             ${evt.name}
             <div class="dates">${formatDate(startDate)} ~ ${formatDate(endDate)}</div>
-            <button class="delete-btn" onclick="deleteEvent(${evt.id}); event.stopPropagation();">×</button>
+            ${deleteBtn}
         `;
 
         bar.addEventListener('mousemove', (e) => {
