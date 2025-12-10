@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>개발 일정 시각화 (Development Schedule)</title>
+    <style>
+        :root {
+            --primary-color: #333;
+            --border-color: #ddd;
+            --bg-color: #f9f9f9;
+            --bar-height: 30px;
+            --row-height: 80px;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background-color: #fff;
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--primary-color);
+        }
+
+        /* Input Section */
+        .controls {
+            background: #f0f0f0;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: flex-end;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .control-group label {
+            font-size: 0.9em;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .control-group input, .control-group select {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        button.secondary-btn {
+            background-color: #6c757d;
+        }
+        button.secondary-btn:hover {
+            background-color: #5a6268;
+        }
+
+        button.clear-btn {
+            background-color: #dc3545;
+        }
+        button.clear-btn:hover {
+            background-color: #a71d2a;
+        }
+
+        .action-buttons {
+            margin-left: auto;
+            display: flex;
+            gap: 10px;
+        }
+
+        /* Chart Section */
+        .chart-container {
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+            position: relative;
+            background: white;
+        }
+
+        .timeline-header {
+            display: flex;
+            border-bottom: 2px solid var(--primary-color);
+            background: #eee;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .model-header-cell {
+            min-width: 100px;
+            width: 100px;
+            padding: 10px;
+            font-weight: bold;
+            background: #e0e0e0;
+            border-right: 2px solid var(--primary-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            position: sticky;
+            left: 0;
+            z-index: 20;
+        }
+
+        .months-container {
+            display: flex;
+            flex-grow: 1;
+        }
+
+        .month-cell {
+            flex: 1;
+            min-width: 60px;
+            text-align: center;
+            padding: 5px 0;
+            border-right: 1px solid var(--border-color);
+            font-size: 0.9em;
+            background: #eee;
+        }
+        
+        .year-label {
+            display: block;
+            font-size: 0.8em;
+            color: #666;
+        }
+
+        .chart-body {
+            position: relative;
+        }
+
+        .model-row {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            min-height: var(--row-height);
+            position: relative;
+        }
+
+        .model-name {
+            min-width: 100px;
+            width: 100px;
+            background: #f4f4f4;
+            border-right: 2px solid var(--primary-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+            position: sticky;
+            left: 0;
+            z-index: 5;
+        }
+
+        .timeline-track {
+            flex-grow: 1;
+            position: relative;
+            background-image: linear-gradient(to right, transparent 99%, #eee 1%);
+            background-size: calc(100% / 15) 100%; /* 15 months grid */
+        }
+
+        .event-bar {
+            position: absolute;
+            height: var(--bar-height);
+            background-color: #ddd;
+            border: 1px solid #999;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8em;
+            color: #000;
+            overflow: hidden;
+            white-space: nowrap;
+            box-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+            top: 10px; /* Default top */
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        .event-bar:hover {
+            transform: scale(1.02);
+            z-index: 100;
+        }
+
+        .event-bar .dates {
+            font-size: 0.7em;
+            position: absolute;
+            bottom: 2px;
+            width: 100%;
+            text-align: center;
+            opacity: 0.7;
+        }
+        
+        .event-bar.phase-2 {
+            top: 45px; /* Offset for overlapping events if needed */
+        }
+
+        /* Arrow style for timeline end */
+        .timeline-track::after {
+            content: '';
+            position: absolute;
+            right: -10px;
+            top: 50%;
+            border-top: 10px solid transparent;
+            border-bottom: 10px solid transparent;
+            border-left: 10px solid #ccc;
+            transform: translateY(-50%);
+        }
+        
+        .tooltip {
+            position: absolute;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            display: none;
+            z-index: 1000;
+        }
+        
+        .delete-btn {
+            position: absolute;
+            right: 2px;
+            top: 2px;
+            background: red;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            font-size: 10px;
+            line-height: 16px;
+            text-align: center;
+            cursor: pointer;
+            display: none;
+        }
+        
+        .event-bar:hover .delete-btn {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Project Schedule Viewer</h1>
+
+    <div class="controls">
+        <div class="control-group">
+            <label for="baseYear">기준 연도 (Base Year)</label>
+            <input type="number" id="baseYear" value="2025" style="width: 80px;">
+        </div>
+        <div class="control-group">
+            <label for="modelName">모델명 (Model)</label>
+            <input type="text" id="modelName" placeholder="e.g., S7" value="S7">
+        </div>
+        <div class="control-group">
+            <label for="eventName">이벤트 단계 (Event)</label>
+            <input type="text" id="eventName" placeholder="e.g., CP, PV" value="CP">
+        </div>
+        <div class="control-group">
+            <label for="startDate">시작일 (Start)</label>
+            <input type="date" id="startDate">
+        </div>
+        <div class="control-group">
+            <label for="endDate">종료일 (End)</label>
+            <input type="date" id="endDate">
+        </div>
+        <div class="control-group">
+            <label for="eventColor">색상 (Color)</label>
+            <input type="color" id="eventColor" value="#e0e0e0">
+        </div>
+        <div class="control-group">
+            <label for="rowPosition">위치 (Row)</label>
+            <select id="rowPosition">
+                <option value="top">상단 (Top)</option>
+                <option value="bottom">하단 (Bottom)</option>
+            </select>
+        </div>
+        <button onclick="addEvent()">추가 (Add)</button>
+        
+        <div class="action-buttons">
+            <button class="secondary-btn" onclick="exportData()">파일 저장 (Export)</button>
+            <button class="secondary-btn" onclick="document.getElementById('importFile').click()">파일 열기 (Import)</button>
+            <input type="file" id="importFile" style="display:none" onchange="importData(this)" accept=".json">
+            <button class="clear-btn" onclick="clearEvents()">초기화 (Clear)</button>
+        </div>
+    </div>
+
+    <div class="chart-container" id="chartContainer">
+        <!-- Header generated by JS -->
+        <div class="timeline-header" id="timelineHeader"></div>
+        <!-- Body generated by JS -->
+        <div class="chart-body" id="chartBody"></div>
+    </div>
+    
+    <div id="tooltip" class="tooltip"></div>
+
+<script>
+    // State
+    let events = [];
+    let baseYear = 2025;
+    
+    // Constants
+    const MONTHS_TO_SHOW = 15; // Jan Year 1 to Mar Year 2
+    const STORAGE_KEY = 'project_schedule_data';
+    const DATA_FILE = 'data.json';
+
+    // Initialize
+    window.onload = async () => {
+        const today = new Date();
+        
+        // 1. Try to load from data.json (Shared Data)
+        let serverData = null;
+        try {
+            const response = await fetch(DATA_FILE);
+            if (response.ok) {
+                serverData = await response.json();
+                console.log('Loaded data from server');
+            }
+        } catch (e) {
+            console.log('No server data found or fetch failed');
+        }
+
+        // 2. Load from LocalStorage (Personal Overrides)
+        const localData = loadFromLocalStorage();
+
+        // Priority: Local > Server > Default
+        // But if we want to share, maybe Server should be default if Local is empty?
+        // Or provide a UI to choose.
+        
+        // Current Strategy: Use Server data if available and Local is empty, 
+        // or if Server data is newer? (Hard to track version without metadata)
+        // Simple approach: Use Server data if available. 
+        // If user makes changes, they are saved locally.
+        
+        if (serverData) {
+            baseYear = serverData.baseYear || 2025;
+            events = serverData.events || [];
+            // If we loaded from server, we might want to clear local storage to avoid stale data
+            // or just use it. Let's use server data as the "Source of Truth" for the initial view
+            // unless the user has unsaved local work? 
+            // For this simple tool, let's prefer Server Data if it exists, 
+            // effectively resetting local changes to the shared state on reload 
+            // UNLESS we want local persistence.
+            
+            // User request: "Updates shouldn't disappear on refresh"
+            // If they edit locally, it saves to local storage.
+            // If they want to share, they must update data.json.
+            
+            // Let's load LocalStorage. If it exists, use it (it might have unsaved changes).
+            // If not, use ServerData.
+            if (localData) {
+                baseYear = localData.baseYear;
+                events = localData.events;
+                console.log('Loaded local data');
+            } else {
+                baseYear = serverData.baseYear;
+                events = serverData.events;
+                // Save to local so it persists
+                saveToLocalStorage();
+            }
+        } else if (localData) {
+             baseYear = localData.baseYear;
+             events = localData.events;
+        } else {
+            // Defaults
+            document.getElementById('baseYear').value = today.getFullYear();
+            baseYear = today.getFullYear();
+        }
+        
+        // Update UI
+        document.getElementById('baseYear').value = baseYear;
+        
+        // Set default dates for input
+        const start = new Date(baseYear, 0, 1);
+        const end = new Date(baseYear, 1, 1);
+        document.getElementById('startDate').valueAsDate = start;
+        document.getElementById('endDate').valueAsDate = end;
+
+        renderChart();
+    };
+
+    // Update base year
+    document.getElementById('baseYear').addEventListener('change', (e) => {
+        baseYear = parseInt(e.target.value);
+        saveToLocalStorage(); // Save the preference
+        renderChart();
+    });
+
+    function addEvent() {
+        const model = document.getElementById('modelName').value;
+        const name = document.getElementById('eventName').value;
+        const start = document.getElementById('startDate').value;
+        const end = document.getElementById('endDate').value;
+        const color = document.getElementById('eventColor').value;
+        const position = document.getElementById('rowPosition').value;
+
+        if (!model || !name || !start || !end) {
+            alert('모든 필드를 입력해주세요.');
+            return;
+        }
+
+        events.push({
+            id: Date.now(),
+            model,
+            name,
+            start,
+            end,
+            color,
+            position
+        });
+
+        saveToLocalStorage();
+        renderChart();
+    }
+    
+    function deleteEvent(id) {
+        if(confirm('이 일정을 삭제하시겠습니까?')) {
+            events = events.filter(e => e.id !== id);
+            saveToLocalStorage();
+            renderChart();
+        }
+    }
+
+    function clearEvents() {
+        if(confirm('모든 일정을 삭제하시겠습니까?')) {
+            events = [];
+            saveToLocalStorage();
+            renderChart();
+        }
+    }
+
+    // --- Persistence & Sharing ---
+
+    function saveToLocalStorage() {
+        const data = {
+            baseYear: baseYear,
+            events: events
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+
+    function loadFromLocalStorage() {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch (e) {
+                console.error('Failed to load data', e);
+            }
+        }
+        return null;
+    }
+
+    function exportData() {
+        const data = {
+            baseYear: baseYear,
+            events: events
+        };
+        const jsonString = JSON.stringify(data, null, 2);
+        const blob = new Blob([jsonString], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `schedule_data_${new Date().toISOString().slice(0,10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    function importData(input) {
+        const file = input.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = JSON.parse(e.target.result);
+                if (data.events && Array.isArray(data.events)) {
+                    baseYear = data.baseYear || baseYear;
+                    events = data.events;
+                    document.getElementById('baseYear').value = baseYear;
+                    saveToLocalStorage();
+                    renderChart();
+                    alert('데이터를 성공적으로 불러왔습니다.');
+                } else {
+                    alert('올바르지 않은 데이터 형식입니다.');
+                }
+            } catch (err) {
+                alert('파일을 읽는 중 오류가 발생했습니다.');
+                console.error(err);
+            }
+            // Reset input so same file can be selected again
+            input.value = '';
+        };
+        reader.readAsText(file);
+    }
+
+    // --- Rendering ---
+
+    function renderChart() {
+        const header = document.getElementById('timelineHeader');
+        const body = document.getElementById('chartBody');
+        
+        header.innerHTML = '';
+        body.innerHTML = '';
+
+        // 1. Render Header
+        const modelHeader = document.createElement('div');
+        modelHeader.className = 'model-header-cell';
+        modelHeader.textContent = 'Model';
+        header.appendChild(modelHeader);
+
+        const monthsContainer = document.createElement('div');
+        monthsContainer.className = 'months-container';
+        
+        const monthNames = [];
+        for (let i = 0; i < MONTHS_TO_SHOW; i++) {
+            const d = new Date(baseYear, i, 1);
+            const m = d.getMonth() + 1;
+            const y = d.getFullYear();
+            monthNames.push({ m, y });
+            
+            const cell = document.createElement('div');
+            cell.className = 'month-cell';
+            cell.innerHTML = `<span class="year-label">${i === 0 || m === 1 ? y + '년' : ''}</span>${m}월`;
+            monthsContainer.appendChild(cell);
+        }
+        header.appendChild(monthsContainer);
+
+        // 2. Group events by Model
+        // Sort models alphabetically or by some logic if needed
+        const models = [...new Set(events.map(e => e.model))].sort();
+        
+        // 3. Render Rows
+        models.forEach(model => {
+            const row = document.createElement('div');
+            row.className = 'model-row';
+
+            // Model Name
+            const nameCell = document.createElement('div');
+            nameCell.className = 'model-name';
+            nameCell.textContent = model;
+            row.appendChild(nameCell);
+
+            // Timeline Track
+            const track = document.createElement('div');
+            track.className = 'timeline-track';
+            
+            // Filter events for this model
+            const modelEvents = events.filter(e => e.model === model);
+            
+            modelEvents.forEach(evt => {
+                const bar = createEventBar(evt);
+                track.appendChild(bar);
+            });
+
+            row.appendChild(track);
+            body.appendChild(row);
+        });
+    }
+
+    function createEventBar(evt) {
+        const startDate = new Date(evt.start);
+        const endDate = new Date(evt.end);
+        
+        // Chart Range: Jan 1st of BaseYear to Mar 31st of Next Year
+        const chartStart = new Date(baseYear, 0, 1);
+        const chartEnd = new Date(baseYear + 1, 3, 0); // Mar 31st
+        const totalDuration = chartEnd - chartStart;
+
+        // Calculate position
+        let startDiff = startDate - chartStart;
+        let duration = endDate - startDate;
+
+        // Clip if out of range (optional, but good for visual)
+        if (startDate < chartStart) {
+            duration -= (chartStart - startDate);
+            startDiff = 0;
+        }
+        
+        const leftPercent = (startDiff / totalDuration) * 100;
+        const widthPercent = (duration / totalDuration) * 100;
+
+        const bar = document.createElement('div');
+        bar.className = 'event-bar';
+        if (evt.position === 'bottom') {
+            bar.classList.add('phase-2');
+        }
+        
+        bar.style.left = `${leftPercent}%`;
+        bar.style.width = `${widthPercent}%`;
+        bar.style.backgroundColor = evt.color;
+        
+        // Text content
+        bar.innerHTML = `
+            ${evt.name}
+            <div class="dates">${formatDate(startDate)} ~ ${formatDate(endDate)}</div>
+            <button class="delete-btn" onclick="deleteEvent(${evt.id}); event.stopPropagation();">×</button>
+        `;
+
+        // Tooltip
+        bar.addEventListener('mousemove', (e) => {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.style.display = 'block';
+            tooltip.style.left = e.pageX + 10 + 'px';
+            tooltip.style.top = e.pageY + 10 + 'px';
+            tooltip.innerHTML = `
+                <strong>${evt.model} - ${evt.name}</strong><br>
+                ${evt.start} ~ ${evt.end}
+            `;
+        });
+        
+        bar.addEventListener('mouseleave', () => {
+            document.getElementById('tooltip').style.display = 'none';
+        });
+
+        return bar;
+    }
+
+    function formatDate(date) {
+        return `${date.getMonth() + 1}/${date.getDate()}`;
+    }
+</script>
+
+</body>
+</html>
