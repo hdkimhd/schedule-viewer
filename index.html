@@ -351,17 +351,6 @@
         .resize-handle.right {
             right: 0;
         }
-
-        /* Today Line */
-        .today-line {
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            width: 0;
-            border-left: 2px dashed red;
-            z-index: 50;
-            pointer-events: none;
-        }
     </style>
 </head>
 <body>
@@ -426,8 +415,7 @@
                 <option value="bottom">하단 (Bottom)</option>
             </select>
         </div>
-        <button id="saveBtn" onclick="saveEvent()">추가 (Add)</button>
-        <button id="cancelBtn" onclick="cancelEdit()" style="display:none; background-color: #6c757d;">취소 (Cancel)</button>
+        <button onclick="addEvent()">추가 (Add)</button>
         
         <div class="action-buttons">
             <button class="secondary-btn" onclick="toggleViewMode()" id="viewModeBtn">전체 보기 (Full Year)</button>
@@ -470,9 +458,6 @@
     let db = null;
     let isFullView = false;
     const DOC_ID = 'shared_schedule'; // Document ID in Firestore
-    
-    // Edit State
-    let editingEventId = null;
     
     // Resize State
     let isResizing = false;
@@ -554,14 +539,6 @@
         saveToFirebase(); // Sync change
     });
 
-    function saveEvent() {
-        if (editingEventId) {
-            updateEvent();
-        } else {
-            addEvent();
-        }
-    }
-
     function addEvent() {
         if (!db) return alert('데이터베이스에 연결되지 않았습니다.');
 
@@ -596,92 +573,6 @@
         });
 
         saveToFirebase();
-    }
-
-    function updateEvent() {
-        if (!db) return alert('데이터베이스에 연결되지 않았습니다.');
-
-        const category = document.getElementById('categoryName').value;
-        const model = document.getElementById('modelName').value;
-        
-        const phase = document.getElementById('eventPhase').value;
-        const round = document.getElementById('eventRound').value;
-        const name = round ? `${phase} ${round}` : phase;
-
-        const start = document.getElementById('startDate').value;
-        const end = document.getElementById('endDate').value;
-        const color = document.getElementById('eventColor').value;
-        const position = document.getElementById('rowPosition').value;
-
-        if (!model || !start || !end) {
-            alert('모든 필드를 입력해주세요.');
-            return;
-        }
-
-        // Find and update
-        const index = events.findIndex(e => e.id === editingEventId);
-        if (index !== -1) {
-            events[index] = {
-                ...events[index],
-                category: category || 'Uncategorized',
-                model,
-                name,
-                phase,
-                round,
-                start,
-                end,
-                color,
-                position
-            };
-            saveToFirebase();
-            cancelEdit(); // Exit edit mode
-        }
-    }
-
-    function startEditEvent(evt) {
-        if (evt.isAggregated) return; // Cannot edit aggregated events directly
-
-        editingEventId = evt.id;
-        
-        document.getElementById('categoryName').value = evt.category;
-        document.getElementById('modelName').value = evt.model;
-        document.getElementById('eventPhase').value = evt.phase || '';
-        document.getElementById('eventRound').value = evt.round || '';
-        document.getElementById('startDate').value = evt.start;
-        document.getElementById('endDate').value = evt.end;
-        document.getElementById('eventColor').value = evt.color;
-        document.getElementById('rowPosition').value = evt.position;
-
-        const btn = document.getElementById('saveBtn');
-        btn.textContent = '수정 (Update)';
-        btn.style.backgroundColor = '#28a745'; // Green
-        
-        document.getElementById('cancelBtn').style.display = 'inline-block';
-        
-        // Scroll to top
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    function cancelEdit() {
-        editingEventId = null;
-        
-        // Reset inputs to default (optional, or just leave them)
-        // Let's reset to today/default for convenience
-        const today = new Date();
-        const start = new Date();
-        const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-        
-        document.getElementById('modelName').value = '';
-        document.getElementById('eventPhase').value = '';
-        document.getElementById('eventRound').value = '';
-        document.getElementById('startDate').valueAsDate = start;
-        document.getElementById('endDate').valueAsDate = end;
-
-        const btn = document.getElementById('saveBtn');
-        btn.textContent = '추가 (Add)';
-        btn.style.backgroundColor = '#007bff'; // Blue
-        
-        document.getElementById('cancelBtn').style.display = 'none';
     }
     
     function deleteEvent(id) {
@@ -864,20 +755,6 @@
         });
         header.appendChild(monthsContainer);
 
-        // --- Render Today Line ---
-        const todayPos = getDatePosition(new Date());
-        if (todayPos >= 0 && todayPos <= 100) {
-            const todayLine = document.createElement('div');
-            todayLine.className = 'today-line';
-            todayLine.style.left = `${todayPos}%`;
-            // Append to chartBody so it spans full height
-            // Note: chartBody is cleared at start of renderChart, so we can append now.
-            // But we want it to be on top of rows? Or behind?
-            // If we append now, it will be the first child.
-            // If we append after rows, it will be last child (on top).
-            // Let's append it later.
-        }
-
         // 2. Group events by Category and Model
         // Get unique combinations
         const combinations = [];
@@ -1032,15 +909,6 @@
             catGroup.appendChild(modelsContainer);
             body.appendChild(catGroup);
         });
-
-        // Append Today Line at the end to be on top
-        const todayPos = getDatePosition(new Date());
-        if (todayPos >= 0 && todayPos <= 100) {
-            const todayLine = document.createElement('div');
-            todayLine.className = 'today-line';
-            todayLine.style.left = `${todayPos}%`;
-            body.appendChild(todayLine);
-        }
     }
 
     function createEventBar(evt, getDatePosition) {
@@ -1085,18 +953,6 @@
             ${deleteBtn}
             ${!evt.isAggregated ? '<div class="resize-handle left"></div><div class="resize-handle right"></div>' : ''}
         `;
-
-        // Click to Edit
-        bar.onclick = (e) => {
-            // If we were resizing, don't trigger edit
-            // But click event fires after mouseup.
-            // We can check if mouse moved significantly?
-            // Or just rely on isResizing flag which is false by now.
-            // Actually, if we resized, we probably don't want to edit immediately.
-            // But let's keep it simple.
-            e.stopPropagation();
-            startEditEvent(evt);
-        };
 
         // Tooltip
         bar.addEventListener('mousemove', (e) => {
