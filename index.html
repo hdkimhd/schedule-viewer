@@ -351,12 +351,157 @@
         .resize-handle.right {
             right: 0;
         }
+
+        /* Event List Styles */
+        .event-list-container {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .event-list-container h2 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: var(--primary-color);
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 10px;
+        }
+
+        .category-section {
+            margin-bottom: 25px;
+        }
+
+        .category-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #2c3e50;
+            background: #e9ecef;
+            padding: 10px 15px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+
+        .model-section {
+            margin-left: 20px;
+            margin-bottom: 15px;
+        }
+
+        .model-title {
+            font-weight: 600;
+            color: #34495e;
+            font-size: 1.05em;
+            margin-bottom: 8px;
+            padding: 5px 10px;
+            background: #f1f3f4;
+            border-left: 3px solid #007bff;
+        }
+
+        .event-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 15px;
+            margin: 5px 0 5px 15px;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            transition: all 0.2s;
+        }
+
+        .event-item:hover {
+            background: #f8f9fa;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .event-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .event-color-box {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            border: 1px solid #999;
+            flex-shrink: 0;
+        }
+
+        .event-phase {
+            font-weight: 600;
+            min-width: 80px;
+        }
+
+        .event-dates {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .event-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .event-actions button {
+            padding: 5px 12px;
+            font-size: 0.85em;
+            border-radius: 4px;
+        }
+
+        .edit-btn {
+            background-color: #28a745;
+        }
+        .edit-btn:hover {
+            background-color: #218838;
+        }
+
+        .delete-item-btn {
+            background-color: #dc3545;
+        }
+        .delete-item-btn:hover {
+            background-color: #c82333;
+        }
+
+        .no-events {
+            text-align: center;
+            color: #666;
+            padding: 30px;
+            font-style: italic;
+        }
+
+        /* Edit Mode Styles */
+        button.cancel-btn {
+            background-color: #6c757d;
+        }
+        button.cancel-btn:hover {
+            background-color: #5a6268;
+        }
+
+        .editing-indicator {
+            background-color: #fff3cd;
+            border: 2px solid #ffc107;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .editing-indicator.show {
+            display: block;
+        }
     </style>
 </head>
 <body>
 
     <h1>Project Schedule Viewer (Shared)</h1>
     <div id="status" class="status-bar status-disconnected">데이터베이스 연결 대기중...</div>
+
+    <div id="editingIndicator" class="editing-indicator">
+        ⚠️ <strong>수정 모드</strong>: 아래 폼에서 내용을 수정한 후 "수정" 버튼을 클릭하세요.
+    </div>
 
     <div class="controls">
         <div class="control-group">
@@ -415,7 +560,8 @@
                 <option value="bottom">하단 (Bottom)</option>
             </select>
         </div>
-        <button onclick="addEvent()">추가 (Add)</button>
+        <button id="submitBtn" onclick="handleSubmit()">추가 (Add)</button>
+        <button id="cancelBtn" class="cancel-btn" onclick="cancelEdit()" style="display:none;">취소 (Cancel)</button>
         
         <div class="action-buttons">
             <button class="secondary-btn" onclick="toggleViewMode()" id="viewModeBtn">전체 보기 (Full Year)</button>
@@ -429,6 +575,12 @@
     </div>
     
     <div id="tooltip" class="tooltip"></div>
+
+    <!-- Event List Section -->
+    <div class="event-list-container" id="eventListContainer">
+        <h2>📋 전체 일정 목록</h2>
+        <div id="eventList"></div>
+    </div>
 
 <script>
     // --- 1. Firebase 설정 (여기에 복사한 내용을 붙여넣으세요) ---
@@ -458,6 +610,9 @@
     let db = null;
     let isFullView = false;
     const DOC_ID = 'shared_schedule'; // Document ID in Firestore
+    
+    // Edit State
+    let editingEventId = null;
     
     // Resize State
     let isResizing = false;
@@ -539,6 +694,14 @@
         saveToFirebase(); // Sync change
     });
 
+    function handleSubmit() {
+        if (editingEventId) {
+            updateEvent();
+        } else {
+            addEvent();
+        }
+    }
+
     function addEvent() {
         if (!db) return alert('데이터베이스에 연결되지 않았습니다.');
 
@@ -573,6 +736,78 @@
         });
 
         saveToFirebase();
+    }
+    
+    // 수정 모드 시작
+    function startEditEvent(id) {
+        const evt = events.find(e => e.id === id);
+        if (!evt) return;
+        
+        editingEventId = id;
+        
+        // 폼에 데이터 채우기
+        document.getElementById('categoryName').value = evt.category || 'Soundbar';
+        document.getElementById('modelName').value = evt.model;
+        document.getElementById('eventPhase').value = evt.phase || evt.name.split(' ')[0];
+        document.getElementById('eventRound').value = evt.round || '';
+        document.getElementById('startDate').value = evt.start;
+        document.getElementById('endDate').value = evt.end;
+        document.getElementById('eventColor').value = evt.color;
+        document.getElementById('rowPosition').value = evt.position || 'top';
+        
+        // UI 상태 변경
+        document.getElementById('submitBtn').textContent = '수정 (Update)';
+        document.getElementById('cancelBtn').style.display = 'inline-block';
+        document.getElementById('editingIndicator').classList.add('show');
+        
+        // 상단으로 스크롤
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    
+    // 이벤트 수정
+    function updateEvent() {
+        if (!editingEventId) return;
+        
+        const category = document.getElementById('categoryName').value;
+        const model = document.getElementById('modelName').value;
+        const phase = document.getElementById('eventPhase').value;
+        const round = document.getElementById('eventRound').value;
+        const name = round ? `${phase} ${round}` : phase;
+        const start = document.getElementById('startDate').value;
+        const end = document.getElementById('endDate').value;
+        const color = document.getElementById('eventColor').value;
+        const position = document.getElementById('rowPosition').value;
+        
+        if (!model || !start || !end) {
+            alert('모든 필드를 입력해주세요.');
+            return;
+        }
+        
+        // 이벤트 업데이트
+        events = events.map(e => {
+            if (e.id === editingEventId) {
+                return { ...e, category, model, name, phase, round, start, end, color, position };
+            }
+            return e;
+        });
+        
+        saveToFirebase();
+        cancelEdit();
+    }
+    
+    // 수정 모드 취소
+    function cancelEdit() {
+        editingEventId = null;
+        
+        // UI 복원
+        document.getElementById('submitBtn').textContent = '추가 (Add)';
+        document.getElementById('cancelBtn').style.display = 'none';
+        document.getElementById('editingIndicator').classList.remove('show');
+        
+        // 폼 초기화 (선택적)
+        document.getElementById('modelName').value = 'S7';
+        document.getElementById('eventPhase').value = 'FC';
+        document.getElementById('eventRound').value = '';
     }
     
     function deleteEvent(id) {
@@ -908,6 +1143,99 @@
             
             catGroup.appendChild(modelsContainer);
             body.appendChild(catGroup);
+        });
+        
+        // 이벤트 리스트 렌더링
+        renderEventList();
+    }
+    
+    // 이벤트 리스트 렌더링
+    function renderEventList() {
+        const listContainer = document.getElementById('eventList');
+        listContainer.innerHTML = '';
+        
+        if (events.length === 0) {
+            listContainer.innerHTML = '<div class="no-events">등록된 일정이 없습니다.</div>';
+            return;
+        }
+        
+        // 카테고리별 그룹핑
+        const grouped = {};
+        events.forEach(e => {
+            const cat = e.category || 'Uncategorized';
+            if (!grouped[cat]) grouped[cat] = {};
+            if (!grouped[cat][e.model]) grouped[cat][e.model] = [];
+            grouped[cat][e.model].push(e);
+        });
+        
+        // 카테고리 정렬
+        const sortedCategories = Object.keys(grouped).sort((a, b) => {
+            const idxA = CATEGORY_ORDER.indexOf(a);
+            const idxB = CATEGORY_ORDER.indexOf(b);
+            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+            if (idxA !== -1) return -1;
+            if (idxB !== -1) return 1;
+            return a.localeCompare(b);
+        });
+        
+        sortedCategories.forEach(cat => {
+            // 카테고리 섹션
+            const catSection = document.createElement('div');
+            catSection.className = 'category-section';
+            
+            const catTitle = document.createElement('div');
+            catTitle.className = 'category-title';
+            catTitle.textContent = cat;
+            catSection.appendChild(catTitle);
+            
+            // 모델별 정렬
+            const sortedModels = Object.keys(grouped[cat]).sort();
+            
+            sortedModels.forEach(model => {
+                const modelSection = document.createElement('div');
+                modelSection.className = 'model-section';
+                
+                const modelTitle = document.createElement('div');
+                modelTitle.className = 'model-title';
+                modelTitle.textContent = model;
+                modelSection.appendChild(modelTitle);
+                
+                // 이벤트 시작일 기준 정렬
+                const sortedEvents = grouped[cat][model].sort((a, b) => 
+                    new Date(a.start) - new Date(b.start)
+                );
+                
+                sortedEvents.forEach(evt => {
+                    const eventItem = document.createElement('div');
+                    eventItem.className = 'event-item';
+                    if (editingEventId === evt.id) {
+                        eventItem.style.border = '2px solid #ffc107';
+                        eventItem.style.background = '#fff3cd';
+                    }
+                    
+                    const startDate = new Date(evt.start);
+                    const endDate = new Date(evt.end);
+                    const dateStr = `${startDate.getFullYear()}.${String(startDate.getMonth()+1).padStart(2,'0')}.${String(startDate.getDate()).padStart(2,'0')} ~ ${endDate.getFullYear()}.${String(endDate.getMonth()+1).padStart(2,'0')}.${String(endDate.getDate()).padStart(2,'0')}`;
+                    
+                    eventItem.innerHTML = `
+                        <div class="event-info">
+                            <div class="event-color-box" style="background-color: ${evt.color}"></div>
+                            <span class="event-phase">${evt.name}</span>
+                            <span class="event-dates">📅 ${dateStr}</span>
+                        </div>
+                        <div class="event-actions">
+                            <button class="edit-btn" onclick="startEditEvent(${evt.id})">수정</button>
+                            <button class="delete-item-btn" onclick="deleteEvent(${evt.id})">삭제</button>
+                        </div>
+                    `;
+                    
+                    modelSection.appendChild(eventItem);
+                });
+                
+                catSection.appendChild(modelSection);
+            });
+            
+            listContainer.appendChild(catSection);
         });
     }
 
