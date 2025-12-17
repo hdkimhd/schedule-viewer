@@ -320,22 +320,28 @@
         
         .delete-btn {
             position: absolute;
-            right: -8px;
-            top: -8px;
+            right: -10px;
+            top: -10px;
             background: #dc3545;
             color: white;
             border: 2px solid white;
             border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            font-size: 14px;
-            line-height: 16px;
+            width: 22px;
+            height: 22px;
+            min-width: 22px;
+            min-height: 22px;
+            max-width: 22px;
+            max-height: 22px;
+            padding: 0;
+            font-size: 16px;
+            line-height: 1;
             text-align: center;
             cursor: pointer;
             display: none;
             z-index: 150;
             box-shadow: 0 2px 4px rgba(0,0,0,0.3);
             font-weight: bold;
+            box-sizing: border-box;
         }
         
         .delete-btn:hover {
@@ -509,6 +515,76 @@
         .editing-indicator.show {
             display: block;
         }
+
+        /* View Control Section */
+        .view-controls {
+            background: #e8f4fc;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .view-controls-label {
+            font-weight: bold;
+            color: #333;
+            margin-right: 10px;
+        }
+
+        .preset-buttons {
+            display: flex;
+            gap: 5px;
+        }
+
+        .preset-btn {
+            padding: 8px 16px;
+            border: 2px solid #007bff;
+            background: white;
+            color: #007bff;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .preset-btn:hover {
+            background: #e7f1ff;
+        }
+
+        .preset-btn.active {
+            background: #007bff;
+            color: white;
+        }
+
+        .custom-range {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-left: 20px;
+            padding-left: 20px;
+            border-left: 2px solid #ccc;
+        }
+
+        .custom-range label {
+            font-size: 0.9em;
+            color: #555;
+        }
+
+        .custom-range select {
+            padding: 6px 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: white;
+        }
+
+        .range-separator {
+            color: #999;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -518,6 +594,28 @@
 
     <div id="editingIndicator" class="editing-indicator">
         ⚠️ <strong>수정 모드</strong>: 아래 폼에서 내용을 수정한 후 "수정" 버튼을 클릭하세요.
+    </div>
+
+    <!-- View Range Controls -->
+    <div class="view-controls">
+        <span class="view-controls-label">📅 표시 기간:</span>
+        <div class="preset-buttons">
+            <button class="preset-btn" data-months="1" onclick="setViewRange(1)">1개월</button>
+            <button class="preset-btn active" data-months="3" onclick="setViewRange(3)">3개월</button>
+            <button class="preset-btn" data-months="6" onclick="setViewRange(6)">6개월</button>
+            <button class="preset-btn" data-months="12" onclick="setViewRange(12)">1년</button>
+            <button class="preset-btn" data-months="0" onclick="setViewRange(0)">전체</button>
+        </div>
+        <div class="custom-range">
+            <label>시작:</label>
+            <select id="viewStartYear"></select>
+            <select id="viewStartMonth"></select>
+            <span class="range-separator">~</span>
+            <label>종료:</label>
+            <select id="viewEndYear"></select>
+            <select id="viewEndMonth"></select>
+            <button class="preset-btn" onclick="applyCustomRange()">적용</button>
+        </div>
     </div>
 
     <div class="controls">
@@ -581,7 +679,6 @@
         <button id="cancelBtn" class="cancel-btn" onclick="cancelEdit()" style="display:none;">취소 (Cancel)</button>
         
         <div class="action-buttons">
-            <button class="secondary-btn" onclick="toggleViewMode()" id="viewModeBtn">전체 보기 (Full Year)</button>
             <button class="clear-btn" onclick="clearEvents()">전체 초기화 (Clear All)</button>
         </div>
     </div>
@@ -625,8 +722,15 @@
     let events = [];
     let baseYear = 2025;
     let db = null;
-    let isFullView = false;
     const DOC_ID = 'shared_schedule'; // Document ID in Firestore
+    
+    // View Range State
+    let viewMode = 'preset'; // 'preset' or 'custom'
+    let viewMonths = 3; // Default: 3 months
+    let customStartYear = null;
+    let customStartMonth = null;
+    let customEndYear = null;
+    let customEndMonth = null;
     
     // Edit State
     let editingEventId = null;
@@ -646,6 +750,7 @@
     // Initialize
     window.onload = () => {
         initFirebase();
+        initViewControls();
         
         const today = new Date();
         // Set default dates: Start = Today, End = End of Current Month
@@ -656,10 +761,90 @@
         document.getElementById('endDate').valueAsDate = end;
     };
     
-    function toggleViewMode() {
-        isFullView = !isFullView;
-        const btn = document.getElementById('viewModeBtn');
-        btn.textContent = isFullView ? "기본 보기 (Default View)" : "전체 보기 (Full Year)";
+    // 뷰 컨트롤 초기화
+    function initViewControls() {
+        const today = new Date();
+        const currentYear = today.getFullYear();
+        
+        // 연도 선택 옵션 생성 (2024 ~ 2027)
+        const yearSelects = ['viewStartYear', 'viewEndYear'];
+        yearSelects.forEach(id => {
+            const select = document.getElementById(id);
+            for (let y = currentYear - 1; y <= currentYear + 2; y++) {
+                const opt = document.createElement('option');
+                opt.value = y;
+                opt.textContent = y + '년';
+                if (y === currentYear) opt.selected = true;
+                select.appendChild(opt);
+            }
+        });
+        
+        // 월 선택 옵션 생성 (1~12)
+        const monthSelects = ['viewStartMonth', 'viewEndMonth'];
+        monthSelects.forEach(id => {
+            const select = document.getElementById(id);
+            for (let m = 1; m <= 12; m++) {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m + '월';
+                select.appendChild(opt);
+            }
+        });
+        
+        // 기본값: 이전달 ~ 다음달
+        document.getElementById('viewStartMonth').value = today.getMonth(); // 0-based이라 1 빠진 값
+        document.getElementById('viewEndMonth').value = today.getMonth() + 2;
+        
+        // 시작월이 0이면 작년 12월
+        if (today.getMonth() === 0) {
+            document.getElementById('viewStartYear').value = currentYear - 1;
+            document.getElementById('viewStartMonth').value = 12;
+        }
+        // 종료월이 13이면 내년 1월
+        if (today.getMonth() + 2 > 12) {
+            document.getElementById('viewEndYear').value = currentYear + 1;
+            document.getElementById('viewEndMonth').value = (today.getMonth() + 2) - 12;
+        }
+    }
+    
+    // 프리셋 버튼 클릭
+    function setViewRange(months) {
+        viewMode = 'preset';
+        viewMonths = months;
+        
+        // 버튼 활성 상태 업데이트
+        document.querySelectorAll('.preset-btn[data-months]').forEach(btn => {
+            btn.classList.remove('active');
+            if (parseInt(btn.dataset.months) === months) {
+                btn.classList.add('active');
+            }
+        });
+        
+        renderChart();
+    }
+    
+    // 커스텀 범위 적용
+    function applyCustomRange() {
+        viewMode = 'custom';
+        customStartYear = parseInt(document.getElementById('viewStartYear').value);
+        customStartMonth = parseInt(document.getElementById('viewStartMonth').value);
+        customEndYear = parseInt(document.getElementById('viewEndYear').value);
+        customEndMonth = parseInt(document.getElementById('viewEndMonth').value);
+        
+        // 유효성 검사
+        const startDate = new Date(customStartYear, customStartMonth - 1, 1);
+        const endDate = new Date(customEndYear, customEndMonth - 1, 1);
+        
+        if (startDate > endDate) {
+            alert('시작 날짜가 종료 날짜보다 나중입니다.');
+            return;
+        }
+        
+        // 프리셋 버튼 비활성화
+        document.querySelectorAll('.preset-btn[data-months]').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        
         renderChart();
     }
 
@@ -867,13 +1052,20 @@
         let chartStart, totalMonths;
         const today = new Date();
 
-        if (isFullView) {
+        if (viewMode === 'custom') {
+            // 커스텀 범위
+            chartStart = new Date(customStartYear, customStartMonth - 1, 1);
+            const endDate = new Date(customEndYear, customEndMonth - 1, 1);
+            totalMonths = (customEndYear - customStartYear) * 12 + (customEndMonth - customStartMonth) + 1;
+        } else if (viewMonths === 0) {
+            // 전체 보기 (baseYear 기준 15개월)
             chartStart = new Date(baseYear, 0, 1);
-            totalMonths = 15; // Fixed 15 months for full view
+            totalMonths = 15;
         } else {
-            // Default: Previous Month, Current Month, Next Month (Total 3 months)
-            chartStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-            totalMonths = 3; 
+            // 프리셋: 현재 날짜 중심으로 N개월
+            const halfMonths = Math.floor(viewMonths / 2);
+            chartStart = new Date(today.getFullYear(), today.getMonth() - halfMonths, 1);
+            totalMonths = viewMonths;
         }
         
         // Calculate Chart End (First day of the month AFTER the last month)
@@ -1101,7 +1293,10 @@
 
                 let displayEvents = [];
 
-                if (isFullView) {
+                // 전체보기(12개월 이상)일 때만 집계 모드
+                const useAggregation = (viewMode === 'preset' && viewMonths === 0) || totalMonths >= 12;
+
+                if (useAggregation) {
                     // Aggregation Logic for Full View
                     const modelEvents = events.filter(e => 
                         (e.category || 'Uncategorized') === combo.category && 
