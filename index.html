@@ -259,19 +259,25 @@
             justify-content: center;
             font-size: 0.8em;
             color: #000;
-            overflow: hidden;
+            overflow: visible; /* Changed from hidden to visible for delete button */
             white-space: nowrap;
             box-shadow: 2px 2px 4px rgba(0,0,0,0.2);
             top: 10px; /* Default top */
             cursor: pointer;
             transition: transform 0.1s;
             line-height: 1.2;
-            padding: 2px 0;
+            padding: 2px 5px;
         }
 
         .event-bar:hover {
             transform: scale(1.02);
             z-index: 100;
+        }
+
+        .event-bar .event-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
         }
 
         .event-bar .dates {
@@ -280,6 +286,8 @@
             width: 100%;
             text-align: center;
             opacity: 0.7;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         
         .event-bar.phase-2 {
@@ -312,24 +320,33 @@
         
         .delete-btn {
             position: absolute;
-            right: 2px;
-            top: 2px;
-            background: red;
+            right: -8px;
+            top: -8px;
+            background: #dc3545;
             color: white;
-            border: none;
+            border: 2px solid white;
             border-radius: 50%;
-            width: 16px;
-            height: 16px;
-            font-size: 12px;
-            line-height: 14px;
+            width: 20px;
+            height: 20px;
+            font-size: 14px;
+            line-height: 16px;
             text-align: center;
             cursor: pointer;
             display: none;
-            z-index: 101;
+            z-index: 150;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            font-weight: bold;
+        }
+        
+        .delete-btn:hover {
+            background: #c82333;
+            transform: scale(1.1);
         }
         
         .event-bar:hover .delete-btn {
-            display: block;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         /* Resize Handles */
@@ -1224,7 +1241,6 @@
                             <span class="event-dates">📅 ${dateStr}</span>
                         </div>
                         <div class="event-actions">
-                            <button class="edit-btn" onclick="startEditEvent(${evt.id})">수정</button>
                             <button class="delete-item-btn" onclick="deleteEvent(${evt.id})">삭제</button>
                         </div>
                     `;
@@ -1271,17 +1287,30 @@
         bar.style.backgroundColor = evt.color;
         
         // Delete button only for non-aggregated events
-        const deleteBtn = evt.isAggregated ? '' : `<button class="delete-btn" onclick="deleteEvent(${evt.id}); event.stopPropagation();">×</button>`;
-        
         const dateText = isSingleDay ? formatDate(startDate) : `${formatDate(startDate)} ~ ${formatDate(endDate)}`;
 
-        bar.innerHTML = `
-            <div>${evt.name}</div>
-            <div class="dates">${dateText}</div>
-            ${deleteBtn}
-            ${!evt.isAggregated ? '<div class="resize-handle left"></div><div class="resize-handle right"></div>' : ''}
-        `;
-
+        // 텍스트 콘텐츠 (innerHTML 대신 DOM 사용)
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'event-name';
+        nameDiv.textContent = evt.name;
+        bar.appendChild(nameDiv);
+        
+        const datesDiv = document.createElement('div');
+        datesDiv.className = 'dates';
+        datesDiv.textContent = dateText;
+        bar.appendChild(datesDiv);
+        
+        // 삭제 버튼 (집계된 이벤트가 아닌 경우만)
+        if (!evt.isAggregated) {
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'delete-btn';
+            deleteBtn.textContent = '×';
+            deleteBtn.onclick = (e) => {
+                e.stopPropagation();
+                deleteEvent(evt.id);
+            };
+            bar.appendChild(deleteBtn);
+        }
         // Tooltip
         bar.addEventListener('mousemove', (e) => {
             if (isResizing) return; // Don't show tooltip while resizing
@@ -1298,23 +1327,37 @@
         bar.addEventListener('mouseleave', () => {
             document.getElementById('tooltip').style.display = 'none';
         });
+        
+        // 클릭으로 수정 모드 (집계된 이벤트가 아닌 경우만)
+        if (!evt.isAggregated) {
+            bar.addEventListener('click', (e) => {
+                // 삭제 버튼이나 리사이즈 핸들 클릭이 아닌 경우만
+                if (!e.target.classList.contains('delete-btn') && 
+                    !e.target.classList.contains('resize-handle')) {
+                    startEditEvent(evt.id);
+                }
+            });
+        }
 
         // Resize Handlers
         if (!evt.isAggregated) {
-            const leftHandle = bar.querySelector('.resize-handle.left');
-            const rightHandle = bar.querySelector('.resize-handle.right');
-
+            const leftHandle = document.createElement('div');
+            leftHandle.className = 'resize-handle left';
             leftHandle.addEventListener('mousedown', (e) => {
                 e.stopPropagation();
                 e.preventDefault();
                 startResize(e, evt.id, 'left', startDate, endDate);
             });
+            bar.appendChild(leftHandle);
 
+            const rightHandle = document.createElement('div');
+            rightHandle.className = 'resize-handle right';
             rightHandle.addEventListener('mousedown', (e) => {
                 e.stopPropagation();
                 e.preventDefault();
                 startResize(e, evt.id, 'right', startDate, endDate);
             });
+            bar.appendChild(rightHandle);
         }
 
         return bar;
